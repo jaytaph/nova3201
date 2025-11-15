@@ -13,6 +13,12 @@ pub struct Timer {
     irq: bool,
 }
 
+impl Default for Timer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Timer {
     pub fn new() -> Self {
         Self {

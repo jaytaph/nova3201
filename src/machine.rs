@@ -6,6 +6,12 @@ pub struct Machine {
     pub bus: NovaBus,
 }
 
+impl Default for Machine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Machine {
     pub fn new() -> Self {
         Self {

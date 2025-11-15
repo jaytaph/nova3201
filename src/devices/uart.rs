@@ -10,6 +10,12 @@ pub struct Uart {
     irq: bool,
 }
 
+impl Default for Uart {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Uart {
     pub fn new() -> Self {
         Self {
@@ -41,10 +47,7 @@ impl Uart {
     }
 
     pub fn read8(&self, _offset: u32) -> u8 {
-        match self.rx_buffer {
-            Some(byte) => byte,
-            None => 0,
-        }
+        self.rx_buffer.unwrap_or_default()
     }
 
     pub fn push_rx(&mut self, byte: u8) {

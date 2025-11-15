@@ -65,6 +65,12 @@ const TIMER2_ACK: u32 = 0x8000_2130; // W
 const UART_TX: u32 = 0x8000_2200; // W    - Only low 8 bits used
 const UART_STATUS: u32 = 0x8000_2204; // R/W
 
+impl Default for NovaBus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NovaBus {
     pub fn new() -> Self {
         Self {
@@ -186,20 +192,20 @@ impl Bus for NovaBus {
 
     fn load8(&mut self, addr: u32) -> Result<u8, BusError> {
         if addr <= RAM_END {
-            return Ok(self.ram.read8(addr)?);
+            return self.ram.read8(addr);
         }
 
         if Self::in_range(addr, VRAM_BASE, VRAM_SIZE) {
             let off = addr - VRAM_BASE;
-            return Ok(self.vram.read8(off)?);
+            return self.vram.read8(off);
         }
 
         if Self::in_range(addr, FONT_BASE, FONT_SIZE) {
             let off = addr - FONT_BASE;
-            return Ok(self.font_ram.read8(off)?);
+            return self.font_ram.read8(off);
         }
 
-        if addr >= MMIO_BASE && addr <= MMIO_END {
+        if (MMIO_BASE..=MMIO_END).contains(&addr) {
             return self.mmio_read8(addr);
         }
 
@@ -223,7 +229,7 @@ impl Bus for NovaBus {
             return Ok(u32::from_le_bytes([b0, b1, b2, b3]));
         }
 
-        if addr >= MMIO_BASE && addr <= MMIO_END {
+        if (MMIO_BASE..=MMIO_END).contains(&addr) {
             return self.mmio_read32(addr);
         }
 
@@ -248,7 +254,7 @@ impl Bus for NovaBus {
             return Ok(());
         }
 
-        if addr >= MMIO_BASE && addr <= MMIO_END {
+        if (MMIO_BASE..=MMIO_END).contains(&addr) {
             return self.mmio_write8(addr, value);
         }
 
@@ -265,7 +271,7 @@ impl Bus for NovaBus {
             return Ok(());
         }
 
-        if addr >= MMIO_BASE && addr <= MMIO_END {
+        if (MMIO_BASE..=MMIO_END).contains(&addr) {
             self.mmio_write32(addr, value)?;
         }
 
