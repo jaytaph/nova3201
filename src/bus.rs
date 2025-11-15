@@ -12,6 +12,16 @@ pub enum BusError {
     DeviceFault(u32),
 }
 
+impl std::fmt::Display for BusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BusError::Misaligned(addr) => write!(f, "Misaligned access at address 0x{:08X}", addr),
+            BusError::OutOfBounds(addr) => write!(f, "Out of bounds access at address 0x{:08X}", addr),
+            BusError::DeviceFault(addr) => write!(f, "Device fault at address 0x{:08X}", addr),
+        }
+    }
+}
+
 /// Generic bus trait for memory-mapped I/O
 pub trait Bus {
     type Error;

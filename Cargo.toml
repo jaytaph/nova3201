@@ -11,6 +11,10 @@ authors = ["Joshua Thijssen <jthijssen@noxlogic.nl>"]
 name = "nova3201_cli"
 path = "src/bin/nova3201_cli.rs"
 
+[[bin]]
+name = "nvasm"
+path = "src/bin/nvasm.rs"
+
 [lib]
 name = "nova3201"
 path = "src/lib.rs"

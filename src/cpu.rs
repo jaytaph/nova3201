@@ -3,7 +3,7 @@ use crate::cpu::isa::op_str;
 use crate::machine::IrqLines;
 use std::fmt::{Debug, Formatter};
 
-mod isa;
+pub mod isa;
 
 // Special register (SR) flags
 pub const SR_EI: u32 = 1 << 0; // Exception In Progress
