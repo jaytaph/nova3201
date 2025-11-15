@@ -1,0 +1,17 @@
+[package]
+name = "nova3201"
+description = "An emulator for the nova3201 CPU"
+version = "0.1.0"
+edition = "2024"
+authors = ["Joshua Thijssen <jthijssen@noxlogic.nl>"]
+
+[dependencies]
+
+[[bin]]
+name = "nova3201_cli"
+path = "src/bin/nova3201_cli.rs"
+
+[lib]
+name = "nova3201"
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
