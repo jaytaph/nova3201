@@ -63,3 +63,40 @@ pub mod opcode {
     pub const NOP: u8 = 0x3E;
     pub const HALT: u8 = 0x3F;
 }
+
+pub fn op_str(opcode: u8) -> &'static str {
+    match opcode {
+        opcode::ADD => "ADD",
+        opcode::SUB => "SUB",
+        opcode::AND => "AND",
+        opcode::OR => "OR",
+        opcode::XOR => "XOR",
+        opcode::SLT => "SLT",
+        opcode::SLTU => "SLTU",
+        opcode::SHL => "SHL",
+        opcode::SHR => "SHR",
+        opcode::SAR => "SAR",
+        opcode::ADDI => "ADDI",
+        opcode::ANDI => "ANDI",
+        opcode::ORI => "ORI",
+        opcode::XORI => "XORI",
+        opcode::SLTI => "SLTI",
+        opcode::SLTIU => "SLTIU",
+        opcode::LUI => "LUI",
+        opcode::LW => "LW",
+        opcode::SW => "SW",
+        opcode::LB => "LB",
+        opcode::SB => "SB",
+        opcode::BEQ => "BEQ",
+        opcode::BNE => "BNE",
+        opcode::BLT => "BLT",
+        opcode::BGE => "BGE",
+        opcode::J => "J",
+        opcode::JAL => "JAL",
+        opcode::JR => "JR",
+        opcode::JALR => "JALR",
+        opcode::NOP => "NOP",
+        opcode::HALT => "HALT",
+        _ => "UNKNOWN",
+    }
+}

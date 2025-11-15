@@ -1,5 +1,7 @@
 use crate::bus::Bus;
+use crate::cpu::isa::op_str;
 use crate::machine::IrqLines;
+use std::fmt::{Debug, Formatter};
 
 mod isa;
 
@@ -33,8 +35,23 @@ pub struct Instruction {
     rd: usize,
     rs: usize,
     rt: usize,
-    imm16: u16,
-    target: u32,
+    imm16: u16,  // Overlaps with rt
+    target: u32, // Overlaps with imm16, rs, rt, rd
+}
+
+impl Debug for Instruction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{ opcode: {:06}, rd: {:02}, rs: {:02}, rt: {:02}, imm16: {:04X}, target: {:08X} }}",
+            op_str(self.opcode),
+            self.rd,
+            self.rs,
+            self.rt,
+            self.imm16,
+            self.target
+        )
+    }
 }
 
 impl Instruction {
@@ -53,14 +70,14 @@ impl Instruction {
         let rd = ((raw >> 21) & 0x1F) as usize;
         let rs = ((raw >> 16) & 0x1F) as usize;
         let rt = ((raw >> 11) & 0x1F) as usize;
-        let imm16 = (raw & 0xFFFF) as u16;
-        let target = raw & 0x03FF_FFFF;
+        let imm16 = (raw & 0xFFFF) as u16; // Note this overlaps the bits with rt
+        let target = raw & 0x03FF_FFFF; // Note this overlaps the bits with imm16, rd, rs, rt
 
         Self {
             opcode,
-            rd,
             rs,
             rt,
+            rd,
             imm16,
             target,
         }
@@ -109,7 +126,7 @@ impl Cpu {
         let mut exc_pc = self.pc;
 
         // Fetch instruction
-        let raw = bus.load32(self.pc)?;
+        let raw = bus.read32(self.pc)?;
 
         // Decode instruction
         let instr = Instruction::decode(raw);
@@ -138,11 +155,13 @@ impl Cpu {
             next_pc = EXCEPTION_VECTOR;
             next_sr = self.sr & !SR_IE; // Disable interrupts
         } else {
+            // println!("[{:08X}] Instr: {:?}", self.pc, instr);
             // Execute instruction
             match instr.opcode {
                 // -----------------------------
                 // ALU Operations
                 isa::opcode::ADD => {
+                    // rd = rs + rt
                     let rs_val = self.regs[instr.rs];
                     let rt_val = self.regs[instr.rt];
 
@@ -150,6 +169,7 @@ impl Cpu {
                     next_pc = next_pc.wrapping_add(4);
                 }
                 isa::opcode::SUB => {
+                    // rd = rs - rt
                     let rs_val = self.regs[instr.rs];
                     let rt_val = self.regs[instr.rt];
 
@@ -157,6 +177,7 @@ impl Cpu {
                     next_pc = next_pc.wrapping_add(4);
                 }
                 isa::opcode::AND => {
+                    // rd = rs & rt
                     let rs_val = self.regs[instr.rs];
                     let rt_val = self.regs[instr.rt];
 
@@ -164,6 +185,7 @@ impl Cpu {
                     next_pc = next_pc.wrapping_add(4);
                 }
                 isa::opcode::OR => {
+                    // rd = rs | rt
                     let rs_val = self.regs[instr.rs];
                     let rt_val = self.regs[instr.rt];
 
@@ -171,6 +193,7 @@ impl Cpu {
                     next_pc = next_pc.wrapping_add(4);
                 }
                 isa::opcode::XOR => {
+                    // rd = rs ^ rt
                     let rs_val = self.regs[instr.rs];
                     let rt_val = self.regs[instr.rt];
 
@@ -178,6 +201,7 @@ impl Cpu {
                     next_pc = next_pc.wrapping_add(4);
                 }
                 isa::opcode::SLT => {
+                    // rd = (rs < rt) ? 1 : 0
                     let rs_val = self.regs[instr.rs];
                     let rt_val = self.regs[instr.rt];
 
@@ -189,6 +213,7 @@ impl Cpu {
                     next_pc = next_pc.wrapping_add(4);
                 }
                 isa::opcode::SLTU => {
+                    // rd = (rs < rt) ? 1 : 0 (unsigned)
                     let rs_val = self.regs[instr.rs];
                     let rt_val = self.regs[instr.rt];
 
@@ -196,6 +221,7 @@ impl Cpu {
                     next_pc = next_pc.wrapping_add(4);
                 }
                 isa::opcode::SHL => {
+                    // rd = rs << rt
                     let rs_val = self.regs[instr.rs];
                     let rt_val = self.regs[instr.rt];
 
@@ -203,6 +229,7 @@ impl Cpu {
                     next_pc = next_pc.wrapping_add(4);
                 }
                 isa::opcode::SHR => {
+                    // rd = rs >> rt
                     let rs_val = self.regs[instr.rs];
                     let rt_val = self.regs[instr.rt];
 
@@ -210,6 +237,7 @@ impl Cpu {
                     next_pc = next_pc.wrapping_add(4);
                 }
                 isa::opcode::SAR => {
+                    // rd = rs >> rt (arithmetic)
                     let rs_val = self.regs[instr.rs];
                     let rt_val = self.regs[instr.rt];
 
@@ -220,6 +248,7 @@ impl Cpu {
                 // -----------------------------
                 // Immediate ALU Operations
                 isa::opcode::ADDI => {
+                    // rd = rs + imm16 (sign-extended)
                     let rs_val = self.regs[instr.rs];
                     let imm = Self::sign_extend_16(instr.imm16);
 
@@ -227,6 +256,7 @@ impl Cpu {
                     next_pc = next_pc.wrapping_add(4);
                 }
                 isa::opcode::ANDI => {
+                    // rd = rs & imm16 (zero-extended)
                     let rs_val = self.regs[instr.rs];
                     let imm = instr.imm16 as u32;
 
@@ -234,6 +264,7 @@ impl Cpu {
                     next_pc = next_pc.wrapping_add(4);
                 }
                 isa::opcode::ORI => {
+                    // rd = rs | imm16 (zero-extended)
                     let rs_val = self.regs[instr.rs];
                     let imm = instr.imm16 as u32;
 
@@ -241,6 +272,7 @@ impl Cpu {
                     next_pc = next_pc.wrapping_add(4);
                 }
                 isa::opcode::XORI => {
+                    // rd = rs ^ imm16 (zero-extended)
                     let rs_val = self.regs[instr.rs];
                     let imm = instr.imm16 as u32;
 
@@ -248,6 +280,7 @@ impl Cpu {
                     next_pc = next_pc.wrapping_add(4);
                 }
                 isa::opcode::SLTI => {
+                    // rd = (rs < imm16) ? 1 : 0 (sign-extended)
                     let rs_val = self.regs[instr.rs];
                     let imm = Self::sign_extend_16(instr.imm16);
 
@@ -255,6 +288,7 @@ impl Cpu {
                     next_pc = next_pc.wrapping_add(4);
                 }
                 isa::opcode::SLTIU => {
+                    // rd = (rs < imm16) ? 1 : 0 (zero-extended)
                     let rs_val = self.regs[instr.rs];
                     let imm = instr.imm16 as u32;
 
@@ -262,6 +296,7 @@ impl Cpu {
                     next_pc = next_pc.wrapping_add(4);
                 }
                 isa::opcode::LUI => {
+                    // rd = imm16 << 16
                     let imm = instr.imm16 as u32;
 
                     next_regs[instr.rd] = imm.wrapping_shl(16);
@@ -271,85 +306,93 @@ impl Cpu {
                 // -----------------------------
                 // Load / Store Operations
                 isa::opcode::LW => {
+                    // rd = Mem[rs + imm16]
                     let rs_val = self.regs[instr.rs];
                     let imm = Self::sign_extend_16(instr.imm16);
-
                     let addr = rs_val.wrapping_add(imm);
-                    let value = bus.load32(addr)?;
+
+                    let value = bus.read32(addr)?;
+
                     next_regs[instr.rd] = value;
                     next_pc = next_pc.wrapping_add(4);
                 }
                 isa::opcode::SW => {
+                    // Mem[rs + imm16] = rd
                     let rs_val = self.regs[instr.rs];
-                    let rt_val = self.regs[instr.rt];
                     let imm = Self::sign_extend_16(instr.imm16);
-
                     let addr = rs_val.wrapping_add(imm);
-                    let value = rt_val;
-                    bus.store32(addr, value)?;
+
+                    let value = self.regs[instr.rd];
+                    bus.write32(addr, value)?;
                     next_pc = next_pc.wrapping_add(4);
                 }
                 isa::opcode::LB => {
+                    // rd = sign-extended Mem[rs + imm16]
                     let rs_val = self.regs[instr.rs];
                     let imm = Self::sign_extend_16(instr.imm16);
 
                     let addr = rs_val.wrapping_add(imm);
-                    let byte = bus.load8(addr)?;
+                    let byte = bus.read8(addr)?;
                     next_regs[instr.rd] = (byte as i8) as i32 as u32; // sign-extend
                     next_pc = next_pc.wrapping_add(4);
                 }
                 isa::opcode::SB => {
+                    // Mem[rs + imm16] = least-significant byte of rd
                     let rs_val = self.regs[instr.rs];
-                    let rt_val = self.regs[instr.rt];
                     let imm = Self::sign_extend_16(instr.imm16);
-
                     let addr = rs_val.wrapping_add(imm);
-                    let byte = (rt_val & 0xFF) as u8;
-                    bus.store8(addr, byte)?;
+
+                    let rd_val = self.regs[instr.rd];
+                    let byte = (rd_val & 0xFF) as u8;
+                    bus.write8(addr, byte)?;
                     next_pc = next_pc.wrapping_add(4);
                 }
 
                 // -----------------------------
                 // Branch Operations
                 isa::opcode::BEQ => {
+                    // if (rd == rs) pc += imm16 << 2
+                    let rd_val = self.regs[instr.rd];
                     let rs_val = self.regs[instr.rs];
-                    let rt_val = self.regs[instr.rt];
-                    let imm = Self::sign_extend_16(instr.imm16);
 
-                    if rs_val == rt_val {
+                    if rd_val == rs_val {
+                        let imm = Self::sign_extend_16(instr.imm16);
                         next_pc = next_pc.wrapping_add(4).wrapping_add(imm.wrapping_shl(2));
                     } else {
                         next_pc = next_pc.wrapping_add(4);
                     }
                 }
                 isa::opcode::BNE => {
+                    // if (rd != rs) pc += imm16 << 2
+                    let rd_val = self.regs[instr.rd];
                     let rs_val = self.regs[instr.rs];
-                    let rt_val = self.regs[instr.rt];
-                    let imm = Self::sign_extend_16(instr.imm16);
 
-                    if rs_val != rt_val {
+                    if rd_val != rs_val {
+                        let imm = Self::sign_extend_16(instr.imm16);
                         next_pc = next_pc.wrapping_add(4).wrapping_add(imm.wrapping_shl(2));
                     } else {
                         next_pc = next_pc.wrapping_add(4);
                     }
                 }
                 isa::opcode::BLT => {
+                    // if (rd < rs) pc += imm16 << 2
+                    let rd_val = self.regs[instr.rd];
                     let rs_val = self.regs[instr.rs];
-                    let rt_val = self.regs[instr.rt];
-                    let imm = Self::sign_extend_16(instr.imm16);
 
-                    if (rs_val as i32) < (rt_val as i32) {
+                    if (rd_val as i32) < (rs_val as i32) {
+                        let imm = Self::sign_extend_16(instr.imm16);
                         next_pc = next_pc.wrapping_add(4).wrapping_add(imm.wrapping_shl(2));
                     } else {
                         next_pc = next_pc.wrapping_add(4);
                     }
                 }
                 isa::opcode::BGE => {
+                    // if (rd >= rs) pc += imm16 << 2
+                    let rd_val = self.regs[instr.rd];
                     let rs_val = self.regs[instr.rs];
-                    let rt_val = self.regs[instr.rt];
-                    let imm = Self::sign_extend_16(instr.imm16);
 
-                    if (rs_val as i32) >= (rt_val as i32) {
+                    if (rd_val as i32) >= (rs_val as i32) {
+                        let imm = Self::sign_extend_16(instr.imm16);
                         next_pc = next_pc.wrapping_add(4).wrapping_add(imm.wrapping_shl(2));
                     } else {
                         next_pc = next_pc.wrapping_add(4);
@@ -359,22 +402,26 @@ impl Cpu {
                 // -----------------------------
                 // Jumps and Calls
                 isa::opcode::J => {
+                    // pc = (pc & 0xF0000000) | (target << 2)
                     let target_addr = (next_pc & 0xF000_0000) | (instr.target.wrapping_shl(2));
                     next_pc = target_addr;
                 }
                 isa::opcode::JAL => {
+                    // pc = (pc & 0xF0000000) | (target << 2)
+                    // R31 = pc + 4
                     let target_addr = (next_pc & 0xF000_0000) | (instr.target.wrapping_shl(2));
                     next_regs[LINK_REGISTER] = next_pc.wrapping_add(4); // Link
                     next_pc = target_addr;
                 }
                 isa::opcode::JR => {
+                    // pc = rs
                     let rs_val = self.regs[instr.rs];
-
                     next_pc = rs_val;
                 }
                 isa::opcode::JALR => {
+                    // pc = rs
+                    // rd = pc + 4
                     let rs_val = self.regs[instr.rs];
-
                     next_regs[instr.rd] = next_pc.wrapping_add(4); // Link
                     next_pc = rs_val;
                 }

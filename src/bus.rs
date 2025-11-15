@@ -16,10 +16,10 @@ pub enum BusError {
 pub trait Bus {
     type Error;
 
-    fn load8(&mut self, addr: u32) -> Result<u8, Self::Error>;
-    fn load32(&mut self, addr: u32) -> Result<u32, Self::Error>;
-    fn store8(&mut self, addr: u32, value: u8) -> Result<(), Self::Error>;
-    fn store32(&mut self, addr: u32, value: u32) -> Result<(), Self::Error>;
+    fn read8(&mut self, addr: u32) -> Result<u8, Self::Error>;
+    fn read32(&mut self, addr: u32) -> Result<u32, Self::Error>;
+    fn write8(&mut self, addr: u32, value: u8) -> Result<(), Self::Error>;
+    fn write32(&mut self, addr: u32, value: u32) -> Result<(), Self::Error>;
 }
 
 // Concrete implementation of the NovaBus
@@ -190,7 +190,7 @@ impl NovaBus {
 impl Bus for NovaBus {
     type Error = BusError;
 
-    fn load8(&mut self, addr: u32) -> Result<u8, BusError> {
+    fn read8(&mut self, addr: u32) -> Result<u8, BusError> {
         if addr <= RAM_END {
             return self.ram.read8(addr);
         }
@@ -212,7 +212,7 @@ impl Bus for NovaBus {
         Err(BusError::OutOfBounds(addr))
     }
 
-    fn load32(&mut self, addr: u32) -> Result<u32, BusError> {
+    fn read32(&mut self, addr: u32) -> Result<u32, BusError> {
         if addr & 3 != 0 {
             return Err(BusError::Misaligned(addr));
         }
@@ -236,7 +236,7 @@ impl Bus for NovaBus {
         Err(BusError::OutOfBounds(addr))
     }
 
-    fn store8(&mut self, addr: u32, value: u8) -> Result<(), BusError> {
+    fn write8(&mut self, addr: u32, value: u8) -> Result<(), BusError> {
         if addr <= RAM_END {
             self.ram.write8(addr, value)?;
             return Ok(());
@@ -261,7 +261,7 @@ impl Bus for NovaBus {
         Err(BusError::OutOfBounds(addr))
     }
 
-    fn store32(&mut self, addr: u32, value: u32) -> Result<(), BusError> {
+    fn write32(&mut self, addr: u32, value: u32) -> Result<(), BusError> {
         if addr & 3 != 0 {
             return Err(BusError::Misaligned(addr));
         }
