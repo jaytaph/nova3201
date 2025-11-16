@@ -43,14 +43,17 @@ impl Timer {
     }
 
     pub fn reset(&mut self) {
+        println!("[timer] reset");
         self.counter = 0;
     }
 
     pub fn set_ctrl(&mut self, ctrl: u32) {
+        println!("[timer] ctrl={:08x}", ctrl);
         self.ctrl = ctrl;
     }
 
     pub fn set_period(&mut self, period: u32) {
+        println!("[timer] period={}", period);
         self.period = period;
         self.counter = 0;
     }
@@ -86,6 +89,7 @@ impl Timer {
     }
 
     pub fn ack_irq(&mut self) {
+        println!("[timer] ack_irq");
         self.irq = false;
     }
 }

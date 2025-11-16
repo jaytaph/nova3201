@@ -51,4 +51,38 @@ impl Machine {
 
         let _ = self.cpu.step(&mut self.bus, &irq);
     }
+
+    // Copy this function to replace your current inspect() implementation
+    // This is the recommended "Boxed, Clean Layout" version
+
+    pub fn inspect(&self) {
+        println!("┌─────────────────────────────────────────────────────────────────┐");
+        println!("│ CPU State                                                       │");
+        println!("├─────────────────────────────────────────────────────────────────┤");
+
+        // Program Counter and Status
+        println!("│ PC:     0x{:08X}  SR:     0x{:08X}  Halted: {:5}        │",
+                 self.cpu.pc(), self.cpu.sr(), self.cpu.halted());
+        println!("│ EPC:    0x{:08X}  Cause:  0x{:08X}                      │",
+                 self.cpu.epc(), self.cpu.cause());
+
+        println!("├─────────────────────────────────────────────────────────────────┤");
+        println!("│ Registers                                                       │");
+        println!("├─────────────────────────────────────────────────────────────────┤");
+
+        let regs = self.cpu.regs();
+
+        // Print registers in rows of 4
+        for row in 0..8 {
+            print!("│ ");
+            for col in 0..4 {
+                let reg_num = row * 4 + col;
+                print!("r{:<2}: 0x{:08X} ", reg_num, regs[reg_num]);
+            }
+            println!("│");
+        }
+
+        println!("└─────────────────────────────────────────────────────────────────┘");
+        println!();
+    }
 }

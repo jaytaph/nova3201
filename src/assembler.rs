@@ -92,6 +92,8 @@ struct Line {
 enum Imm {
     Value(i16),
     Label(String),
+    LabelHi(String),  // Upper 16 bits of label address
+    LabelLo(String),  // Lower 16 bits of label address
 }
 
 // -----------------------------
@@ -101,6 +103,7 @@ enum Imm {
 pub fn assemble_nv32(source: &str) -> Result<Vec<NvSegment>, AsmError> {
     // 1) First pass: labels + IR + raw data + BSS
     let mut labels = HashMap::<String, u32>::new();
+    let mut equates = HashMap::<String, u32>::new(); // .equ constants (changed to u32)
     let mut lines = Vec::<Line>::new();
     let mut data_words = Vec::<(u32, u32)>::new(); // (addr, word)
     let mut bss_segments = Vec::<(u32, u32)>::new(); // (base_addr, length_words)
@@ -129,8 +132,30 @@ pub fn assemble_nv32(source: &str) -> Result<Vec<NvSegment>, AsmError> {
 
         if rest_trim.starts_with('.') {
             // Directive
-            if rest_trim.starts_with(".string") {
+            if rest_trim.starts_with(".equ") {
+                // .equ NAME, VALUE
+                parse_equ_directive(rest_trim, &mut equates)?;
+            } else if rest_trim.starts_with(".string") {
                 let bytes = parse_string_directive(rest_trim)?;
+                // pack bytes into u32 words (little-endian)
+                let mut idx = 0;
+                while idx < bytes.len() {
+                    let b0 = bytes.get(idx).copied().unwrap_or(0);
+                    let b1 = bytes.get(idx + 1).copied().unwrap_or(0);
+                    let b2 = bytes.get(idx + 2).copied().unwrap_or(0);
+                    let b3 = bytes.get(idx + 3).copied().unwrap_or(0);
+
+                    let word = (b0 as u32)
+                        | ((b1 as u32) << 8)
+                        | ((b2 as u32) << 16)
+                        | ((b3 as u32) << 24);
+
+                    data_words.push((pc, word));
+                    pc = pc.wrapping_add(4);
+                    idx += 4;
+                }
+            } else if rest_trim.starts_with(".ascii") {
+                let bytes = parse_ascii_directive(rest_trim)?;
                 // pack bytes into u32 words (little-endian)
                 let mut idx = 0;
                 while idx < bytes.len() {
@@ -158,7 +183,7 @@ pub fn assemble_nv32(source: &str) -> Result<Vec<NvSegment>, AsmError> {
                         rest_trim
                     )));
                 }
-                let addr = parse_u32(parts[1])?;
+                let addr = parse_u32(parts[1], &equates)?;
                 pc = addr;
             } else if rest_trim.starts_with(".bss") {
                 // .bss <words>   ; reserve N 32-bit words, zero-initialized
@@ -169,20 +194,22 @@ pub fn assemble_nv32(source: &str) -> Result<Vec<NvSegment>, AsmError> {
                         rest_trim
                     )));
                 }
-                let count_words = parse_u32(parts[1])?;
+                let count_words = parse_u32(parts[1], &equates)?;
                 bss_segments.push((pc, count_words));
                 pc = pc.wrapping_add(count_words * 4);
-            } else if rest_trim.starts_with(".text") {
+            } else if rest_trim.starts_with(".text") || rest_trim.starts_with(".data") {
                 // Single-section assembler: treat as no-op marker
                 continue;
             } else {
                 return Err(AsmError::ParseError(format!("Unknown directive: {}", rest_trim)));
             }
         } else {
-            // Instruction
-            let instr = parse_instruction(rest_trim)?;
-            lines.push(Line { addr: pc, instr });
-            pc = pc.wrapping_add(4);
+            // Instruction - may expand into multiple instructions
+            let instrs = parse_instruction(rest_trim, &equates)?;
+            for instr in instrs {
+                lines.push(Line { addr: pc, instr });
+                pc = pc.wrapping_add(4);
+            }
         }
     }
 
@@ -196,7 +223,7 @@ pub fn assemble_nv32(source: &str) -> Result<Vec<NvSegment>, AsmError> {
 
     // code
     for line in lines {
-        let word = encode_instruction(line.instr, &labels, line.addr)?;
+        let word = encode_instruction(line.instr, &labels, &equates, line.addr)?;
         mem.insert(line.addr, word);
     }
 
@@ -289,6 +316,52 @@ fn split_label(line: &str) -> Result<(Option<String>, String), AsmError> {
 }
 
 // -----------------------------
+// .equ directive
+// -----------------------------
+fn parse_equ_directive(line: &str, equates: &mut HashMap<String, u32>) -> Result<(), AsmError> {
+    // Expect: .equ NAME, VALUE
+    let parts: Vec<&str> = line.splitn(2, ' ').collect();
+    if parts.len() < 2 {
+        return Err(AsmError::ParseError(format!("Invalid .equ: {}", line)));
+    }
+    let rest = parts[1].trim();
+
+    // Split by comma
+    let pair: Vec<&str> = rest.splitn(2, ',').collect();
+    if pair.len() != 2 {
+        return Err(AsmError::ParseError(format!("Invalid .equ format (expected NAME, VALUE): {}", line)));
+    }
+
+    let name = pair[0].trim().to_string();
+    let value_str = pair[1].trim();
+
+    // Parse the value (could be hex or decimal)
+    let value = parse_equ_value(value_str, equates)?;
+
+    equates.insert(name, value);
+    Ok(())
+}
+
+fn parse_equ_value(s: &str, equates: &HashMap<String, u32>) -> Result<u32, AsmError> {
+    let s = s.trim();
+
+    // Check if it's a reference to another equate
+    if let Some(&val) = equates.get(s) {
+        return Ok(val);
+    }
+
+    // Try to parse as hex
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        return u32::from_str_radix(hex, 16)
+            .map_err(|_| AsmError::InvalidImmediate(format!("Invalid hex value: {}", s)));
+    }
+
+    // Try to parse as decimal
+    s.parse::<u32>()
+        .map_err(|_| AsmError::InvalidImmediate(format!("Invalid numeric value: {}", s)))
+}
+
+// -----------------------------
 // .string "..." directive
 // -----------------------------
 fn parse_string_directive(line: &str) -> Result<Vec<u8>, AsmError> {
@@ -313,6 +386,7 @@ fn parse_string_directive(line: &str) -> Result<Vec<u8>, AsmError> {
                 Some('r') => bytes.push(b'\r'),
                 Some('\\') => bytes.push(b'\\'),
                 Some('"') => bytes.push(b'"'),
+                Some('0') => bytes.push(0), // null character
                 Some(other) => {
                     return Err(AsmError::ParseError(format!(
                         "Unknown escape sequence: \\{}",
@@ -336,9 +410,56 @@ fn parse_string_directive(line: &str) -> Result<Vec<u8>, AsmError> {
 }
 
 // -----------------------------
+// .ascii "..." directive
+// -----------------------------
+fn parse_ascii_directive(line: &str) -> Result<Vec<u8>, AsmError> {
+    // Expect: .ascii "...."  (same as .string but with explicit \0 if needed)
+    let parts: Vec<&str> = line.splitn(2, ' ').collect();
+    if parts.len() < 2 {
+        return Err(AsmError::ParseError(format!("Invalid .ascii: {}", line)));
+    }
+    let rest = parts[1].trim();
+    if !rest.starts_with('"') || !rest.ends_with('"') {
+        return Err(AsmError::ParseError(format!("Expected quotes in .ascii: {}", line)));
+    }
+    let inner = &rest[1..rest.len() - 1];
+
+    let mut bytes = Vec::new();
+    let mut chars = inner.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => bytes.push(b'\n'),
+                Some('t') => bytes.push(b'\t'),
+                Some('r') => bytes.push(b'\r'),
+                Some('\\') => bytes.push(b'\\'),
+                Some('"') => bytes.push(b'"'),
+                Some('0') => bytes.push(0), // null character
+                Some(other) => {
+                    return Err(AsmError::ParseError(format!(
+                        "Unknown escape sequence: \\{}",
+                        other
+                    )))
+                }
+                None => {
+                    return Err(AsmError::ParseError(
+                        "Dangling backslash in .ascii".to_string(),
+                    ))
+                }
+            }
+        } else {
+            bytes.push(c as u8);
+        }
+    }
+
+    // .ascii includes the \0 only if explicitly written in the string
+    Ok(bytes)
+}
+
+// -----------------------------
 // Parsing instructions
 // -----------------------------
-fn parse_instruction(line: &str) -> Result<Instruction, AsmError> {
+fn parse_instruction(line: &str, equates: &HashMap<String, u32>) -> Result<Vec<Instruction>, AsmError> {
     let mut parts = line.split_whitespace();
     let mnemonic = parts
         .next()
@@ -350,69 +471,183 @@ fn parse_instruction(line: &str) -> Result<Instruction, AsmError> {
 
     match mnemonic.as_str() {
         // Loads / stores: OP rd, imm(rs)
-        "sb" => parse_ls(rest, LsKind::Sb),
-        "sw" => parse_ls(rest, LsKind::Sw),
-        "lw" => parse_ls(rest, LsKind::Lw),
-        "lb" => parse_ls(rest, LsKind::Lb),
+        "sb" => parse_ls(rest, LsKind::Sb, equates).map(|i| vec![i]),
+        "sw" => parse_ls(rest, LsKind::Sw, equates).map(|i| vec![i]),
+        "lw" => parse_ls(rest, LsKind::Lw, equates).map(|i| vec![i]),
+        "lb" => parse_ls(rest, LsKind::Lb, equates).map(|i| vec![i]),
 
         // ALU register ops (2-operand: rd, rs)
-        "add"  => parse_reg_reg(rest).map(|(rd, rs)| Instruction::Add  { rd, rs }),
-        "sub"  => parse_reg_reg(rest).map(|(rd, rs)| Instruction::Sub  { rd, rs }),
-        "and"  => parse_reg_reg(rest).map(|(rd, rs)| Instruction::And  { rd, rs }),
-        "or"   => parse_reg_reg(rest).map(|(rd, rs)| Instruction::Or   { rd, rs }),
-        "xor"  => parse_reg_reg(rest).map(|(rd, rs)| Instruction::Xor  { rd, rs }),
-        "slt"  => parse_reg_reg(rest).map(|(rd, rs)| Instruction::Slt  { rd, rs }),
-        "sltu" => parse_reg_reg(rest).map(|(rd, rs)| Instruction::Sltu { rd, rs }),
-        "shl"  => parse_reg_reg(rest).map(|(rd, rs)| Instruction::Shl  { rd, rs }),
-        "shr"  => parse_reg_reg(rest).map(|(rd, rs)| Instruction::Shr  { rd, rs }),
-        "sar"  => parse_reg_reg(rest).map(|(rd, rs)| Instruction::Sar  { rd, rs }),
+        "add"  => parse_reg_reg(rest).map(|(rd, rs)| vec![Instruction::Add  { rd, rs }]),
+        "sub"  => parse_reg_reg(rest).map(|(rd, rs)| vec![Instruction::Sub  { rd, rs }]),
+        "and"  => parse_reg_reg(rest).map(|(rd, rs)| vec![Instruction::And  { rd, rs }]),
+        "or"   => parse_reg_reg(rest).map(|(rd, rs)| vec![Instruction::Or   { rd, rs }]),
+        "xor"  => parse_reg_reg(rest).map(|(rd, rs)| vec![Instruction::Xor  { rd, rs }]),
+        "slt"  => parse_reg_reg(rest).map(|(rd, rs)| vec![Instruction::Slt  { rd, rs }]),
+        "sltu" => parse_reg_reg(rest).map(|(rd, rs)| vec![Instruction::Sltu { rd, rs }]),
+        "shl"  => parse_reg_reg(rest).map(|(rd, rs)| vec![Instruction::Shl  { rd, rs }]),
+        "shr"  => parse_reg_reg(rest).map(|(rd, rs)| vec![Instruction::Shr  { rd, rs }]),
+        "sar"  => parse_reg_reg(rest).map(|(rd, rs)| vec![Instruction::Sar  { rd, rs }]),
 
         // ALU immediates: OP rd, rs, imm
-        "addi"  => parse_reg_reg_imm(rest).map(|(rd, rs, imm)| Instruction::Addi  { rd, rs, imm }),
-        "andi"  => parse_reg_reg_imm(rest).map(|(rd, rs, imm)| Instruction::Andi  { rd, rs, imm }),
-        "ori"   => parse_reg_reg_imm(rest).map(|(rd, rs, imm)| Instruction::Ori   { rd, rs, imm }),
-        "xori"  => parse_reg_reg_imm(rest).map(|(rd, rs, imm)| Instruction::Xori  { rd, rs, imm }),
-        "slti"  => parse_reg_reg_imm(rest).map(|(rd, rs, imm)| Instruction::Slti  { rd, rs, imm }),
-        "sltiu" => parse_reg_reg_imm(rest).map(|(rd, rs, imm)| Instruction::Sltiu { rd, rs, imm }),
+        "addi"  => parse_reg_reg_imm(rest, equates).map(|(rd, rs, imm)| vec![Instruction::Addi  { rd, rs, imm }]),
+        "andi"  => parse_reg_reg_imm(rest, equates).map(|(rd, rs, imm)| vec![Instruction::Andi  { rd, rs, imm }]),
+        "ori"   => parse_reg_reg_imm(rest, equates).map(|(rd, rs, imm)| vec![Instruction::Ori   { rd, rs, imm }]),
+        "xori"  => parse_reg_reg_imm(rest, equates).map(|(rd, rs, imm)| vec![Instruction::Xori  { rd, rs, imm }]),
+        "slti"  => parse_reg_reg_imm(rest, equates).map(|(rd, rs, imm)| vec![Instruction::Slti  { rd, rs, imm }]),
+        "sltiu" => parse_reg_reg_imm(rest, equates).map(|(rd, rs, imm)| vec![Instruction::Sltiu { rd, rs, imm }]),
 
         // LUI rd, imm
         "lui" => {
             let args = split_args(rest, 2)?;
             let rd = parse_reg(args[0])?;
-            let imm = parse_imm_or_label(args[1]);
-            Ok(Instruction::Lui { rd, imm })
+            let imm = parse_imm_or_label(args[1], equates);
+            Ok(vec![Instruction::Lui { rd, imm }])
         }
 
         // Branches: OP rs, rt, label
-        "beq" => parse_branch(rest).map(|(rs, rt, label)| Instruction::Beq { rs, rt, label }),
-        "bne" => parse_branch(rest).map(|(rs, rt, label)| Instruction::Bne { rs, rt, label }),
-        "blt" => parse_branch(rest).map(|(rs, rt, label)| Instruction::Blt { rs, rt, label }),
-        "bge" => parse_branch(rest).map(|(rs, rt, label)| Instruction::Bge { rs, rt, label }),
+        "beq" => parse_branch(rest).map(|(rs, rt, label)| vec![Instruction::Beq { rs, rt, label }]),
+        "bne" => parse_branch(rest).map(|(rs, rt, label)| vec![Instruction::Bne { rs, rt, label }]),
+        "blt" => parse_branch(rest).map(|(rs, rt, label)| vec![Instruction::Blt { rs, rt, label }]),
+        "bge" => parse_branch(rest).map(|(rs, rt, label)| vec![Instruction::Bge { rs, rt, label }]),
 
         // Jumps / calls
         "j" => {
             let args = split_args(rest, 1)?;
-            Ok(Instruction::J { label: args[0].to_string() })
+            Ok(vec![Instruction::J { label: args[0].to_string() }])
         }
         "jal" => {
             let args = split_args(rest, 1)?;
-            Ok(Instruction::Jal { label: args[0].to_string() })
+            Ok(vec![Instruction::Jal { label: args[0].to_string() }])
         }
         "jr" => {
             let args = split_args(rest, 1)?;
             let rs = parse_reg(args[0])?;
-            Ok(Instruction::Jr { rs })
+            Ok(vec![Instruction::Jr { rs }])
         }
         "jalr" => {
             // jalr rd, rs
             let args = split_args(rest, 2)?;
             let rd = parse_reg(args[0])?;
             let rs = parse_reg(args[1])?;
-            Ok(Instruction::Jalr { rd, rs })
+            Ok(vec![Instruction::Jalr { rd, rs }])
         }
 
-        "nop"  => Ok(Instruction::Nop),
-        "halt" => Ok(Instruction::Halt),
+        // Pseudoinstructions
+        "move" | "mv" => {
+            // move rd, rs => addi rd, rs, 0
+            let args = split_args(rest, 2)?;
+            let rd = parse_reg(args[0])?;
+            let rs = parse_reg(args[1])?;
+            Ok(vec![Instruction::Addi { rd, rs, imm: Imm::Value(0) }])
+        }
+
+        "li" => {
+            // li rd, imm
+            // Smart expansion:
+            //   - If imm fits in 16 bits (signed): addi rd, r0, imm
+            //   - Otherwise: lui rd, upper16; ori rd, rd, lower16
+            let args = split_args(rest, 2)?;
+            let rd = parse_reg(args[0])?;
+            let imm_or_label = parse_imm_or_label(args[1], equates);
+
+            // Try to resolve the immediate to a concrete value
+            match imm_or_label {
+                Imm::Value(v) => {
+                    // Already a 16-bit value, use addi
+                    Ok(vec![Instruction::Addi { rd, rs: 0, imm: Imm::Value(v) }])
+                }
+                Imm::Label(ref name) => {
+                    // Check if it's an equate
+                    if let Some(&val) = equates.get(name) {
+                        // We have the value, check if it needs expansion
+                        if val <= i16::MAX as u32 || val >= (u16::MAX as u32 - i16::MAX as u32) {
+                            // Fits in 16 bits (either positive or upper i16 range)
+                            Ok(vec![Instruction::Addi { rd, rs: 0, imm: Imm::Value(val as u16 as i16) }])
+                        } else {
+                            // Need lui + ori expansion for 32-bit values
+                            let upper = (val >> 16) as i16;
+                            let lower = (val as u16) as i16;
+                            Ok(vec![
+                                Instruction::Lui { rd, imm: Imm::Value(upper) },
+                                Instruction::Ori { rd, rs: rd, imm: Imm::Value(lower) },
+                            ])
+                        }
+                    } else {
+                        // Try parsing as a numeric literal
+                        if let Ok(val) = parse_u32_literal(name) {
+                            // It's a large numeric literal, expand it
+                            if val <= i16::MAX as u32 {
+                                Ok(vec![Instruction::Addi { rd, rs: 0, imm: Imm::Value(val as i16) }])
+                            } else if val <= u16::MAX as u32 {
+                                Ok(vec![Instruction::Addi { rd, rs: 0, imm: Imm::Value(val as u16 as i16) }])
+                            } else {
+                                // Need lui + ori expansion
+                                let upper = (val >> 16) as i16;
+                                let lower = (val as u16) as i16;
+                                Ok(vec![
+                                    Instruction::Lui { rd, imm: Imm::Value(upper) },
+                                    Instruction::Ori { rd, rs: rd, imm: Imm::Value(lower) },
+                                ])
+                            }
+                        } else {
+                            // It's a real label reference (address), use addi for now
+                            // This will be resolved later, and fail if the address doesn't fit
+                            Ok(vec![Instruction::Addi { rd, rs: 0, imm: imm_or_label }])
+                        }
+                    }
+                }
+                Imm::LabelHi(_) | Imm::LabelLo(_) => {
+                    // Shouldn't happen from parse_imm_or_label
+                    Err(AsmError::ParseError("Unexpected LabelHi/Lo in li".to_string()))
+                }
+            }
+        }
+
+        "la" => {
+            // la rd, label/imm - Load Address (always uses lui + ori for full 32-bit)
+            let args = split_args(rest, 2)?;
+            let rd = parse_reg(args[0])?;
+            let imm_or_label = parse_imm_or_label(args[1], equates);
+
+            // Try to resolve to get the actual value
+            match imm_or_label {
+                Imm::Value(v) => {
+                    // Expand to lui + ori even for small values
+                    let val = v as i32 as u32;
+                    let upper = (val >> 16) as i16;
+                    let lower = (val as u16) as i16;
+                    Ok(vec![
+                        Instruction::Lui { rd, imm: Imm::Value(upper) },
+                        Instruction::Ori { rd, rs: rd, imm: Imm::Value(lower) },
+                    ])
+                }
+                Imm::Label(name) => {
+                    // Check if it's an equate with a known value
+                    if let Some(&val) = equates.get(&name) {
+                        let upper = ((val as u32) >> 16) as i16;
+                        let lower = (val as u16) as i16;
+                        Ok(vec![
+                            Instruction::Lui { rd, imm: Imm::Value(upper) },
+                            Instruction::Ori { rd, rs: rd, imm: Imm::Value(lower) },
+                        ])
+                    } else {
+                        // Label address unknown, will be resolved later
+                        // Use LabelHi/LabelLo markers for proper splitting
+                        Ok(vec![
+                            Instruction::Lui { rd, imm: Imm::LabelHi(name.clone()) },
+                            Instruction::Ori { rd, rs: rd, imm: Imm::LabelLo(name) },
+                        ])
+                    }
+                }
+                Imm::LabelHi(_) | Imm::LabelLo(_) => {
+                    // Shouldn't happen from parse_imm_or_label, but handle it
+                    Err(AsmError::ParseError("Unexpected LabelHi/Lo in la".to_string()))
+                }
+            }
+        }
+
+        "nop"  => Ok(vec![Instruction::Nop]),
+        "halt" => Ok(vec![Instruction::Halt]),
 
         _ => Err(AsmError::ParseError(format!(
             "Unknown mnemonic: {}",
@@ -429,7 +664,7 @@ enum LsKind {
 }
 
 // OP rd, imm(rs)
-fn parse_ls(rest: &str, kind: LsKind) -> Result<Instruction, AsmError> {
+fn parse_ls(rest: &str, kind: LsKind, equates: &HashMap<String, u32>) -> Result<Instruction, AsmError> {
     // Format: OP rd, imm(rs)  e.g. SB r3, 0(r1)
     let args = split_args(rest, 2)?;
     let rd = parse_reg(args[0])?;
@@ -453,7 +688,7 @@ fn parse_ls(rest: &str, kind: LsKind) -> Result<Instruction, AsmError> {
     let imm = if imm_str.is_empty() {
         Imm::Value(0)
     } else {
-        parse_imm_or_label(imm_str)
+        parse_imm_or_label(imm_str, equates)
     };
 
     Ok(match kind {
@@ -473,11 +708,11 @@ fn parse_reg_reg(rest: &str) -> Result<(u8, u8), AsmError> {
 }
 
 // rd, rs, imm
-fn parse_reg_reg_imm(rest: &str) -> Result<(u8, u8, Imm), AsmError> {
+fn parse_reg_reg_imm(rest: &str, equates: &HashMap<String, u32>) -> Result<(u8, u8, Imm), AsmError> {
     let args = split_args(rest, 3)?;
     let rd = parse_reg(args[0])?;
     let rs = parse_reg(args[1])?;
-    let imm = parse_imm_or_label(args[2]);
+    let imm = parse_imm_or_label(args[2], equates);
     Ok((rd, rs, imm))
 }
 
@@ -490,10 +725,24 @@ fn parse_branch(rest: &str) -> Result<(u8, u8, String), AsmError> {
     Ok((rs, rt, label))
 }
 
-fn resolve_imm(imm: Imm, labels: &HashMap<String, u32>) -> Result<i16, AsmError> {
+fn resolve_imm(imm: Imm, labels: &HashMap<String, u32>, equates: &HashMap<String, u32>) -> Result<i16, AsmError> {
     match imm {
         Imm::Value(v) => Ok(v),
         Imm::Label(name) => {
+            // First check if it's an equate
+            if let Some(&val) = equates.get(&name) {
+                // Check if it fits in i16 range
+                if val > i16::MAX as u32 && val < (u16::MAX as u32 - i16::MAX as u32) {
+                    return Err(AsmError::InvalidImmediate(format!(
+                        "Equate '{}' value 0x{:X} does not fit in 16-bit immediate",
+                        name, val
+                    )));
+                }
+                // Reinterpret as i16 (handles both positive and two's complement negative)
+                return Ok(val as u16 as i16);
+            }
+
+            // Otherwise treat as address label
             let addr = get_label_addr(&name, labels)?;
             // For now, require address to fit in signed 16-bit
             if addr > i16::MAX as u32 {
@@ -503,6 +752,32 @@ fn resolve_imm(imm: Imm, labels: &HashMap<String, u32>) -> Result<i16, AsmError>
                 )));
             }
             Ok(addr as i16)
+        }
+        Imm::LabelHi(name) => {
+            // Get upper 16 bits of label address
+            // First check equates
+            if let Some(&val) = equates.get(&name) {
+                let upper = (val >> 16) as i16;
+                return Ok(upper);
+            }
+
+            // Otherwise it's an address label
+            let addr = get_label_addr(&name, labels)?;
+            let upper = (addr >> 16) as i16;
+            Ok(upper)
+        }
+        Imm::LabelLo(name) => {
+            // Get lower 16 bits of label address
+            // First check equates
+            if let Some(&val) = equates.get(&name) {
+                let lower = (val as u16) as i16;
+                return Ok(lower);
+            }
+
+            // Otherwise it's an address label
+            let addr = get_label_addr(&name, labels)?;
+            let lower = (addr as u16) as i16;
+            Ok(lower)
         }
     }
 }
@@ -547,13 +822,47 @@ fn parse_reg(s: &str) -> Result<u8, AsmError> {
     Ok(n)
 }
 
-fn parse_imm_or_label(s: &str) -> Imm {
+fn parse_imm_or_label(s: &str, equates: &HashMap<String, u32>) -> Imm {
+    // Check for character literal first
+    if let Some(ch) = parse_char_literal(s) {
+        return Imm::Value(ch as i16);
+    }
+
+    // Check if it's a known equate
+    let trimmed = s.trim();
+    if let Some(&val) = equates.get(trimmed) {
+        // For values that fit in signed i16 range, convert directly
+        if val <= i16::MAX as u32 {
+            return Imm::Value(val as i16);
+        }
+        // For values in upper u16 range (0x8000-0xFFFF), reinterpret as signed
+        // This handles small negative values properly
+        if val <= u16::MAX as u32 {
+            return Imm::Value(val as u16 as i16);
+        }
+        // For large 32-bit values, return as Label so li can expand to lui+ori
+        return Imm::Label(trimmed.to_string());
+    }
+
+    // Try parsing as immediate value
     if let Ok(v) = parse_imm(s) {
         Imm::Value(v)
     } else {
         // treat it as a label name
-        Imm::Label(s.trim().to_string())
+        Imm::Label(trimmed.to_string())
     }
+}
+
+/// Parse character literal like '1' or 'A'
+fn parse_char_literal(s: &str) -> Option<u8> {
+    let s = s.trim();
+    if s.len() >= 3 && s.starts_with('\'') && s.ends_with('\'') {
+        let inner = &s[1..s.len()-1];
+        if inner.len() == 1 {
+            return Some(inner.chars().next().unwrap() as u8);
+        }
+    }
+    None
 }
 
 /// Parse a 16-bit immediate used in the instruction encoding.
@@ -610,10 +919,28 @@ fn parse_imm(s: &str) -> Result<i16, AsmError> {
 }
 
 /// Parse a 32-bit unsigned value for .org / .bss addresses and sizes.
-fn parse_u32(s: &str) -> Result<u32, AsmError> {
+fn parse_u32(s: &str, equates: &HashMap<String, u32>) -> Result<u32, AsmError> {
     let s = s.trim();
 
+    // Check if it's an equate
+    if let Some(&val) = equates.get(s) {
+        return Ok(val);
+    }
+
     if let Some(hex) = s.strip_prefix("0x") {
+        u32::from_str_radix(hex, 16)
+            .map_err(|_| AsmError::InvalidImmediate(s.to_string()))
+    } else {
+        s.parse::<u32>()
+            .map_err(|_| AsmError::InvalidImmediate(s.to_string()))
+    }
+}
+
+/// Parse a numeric literal (hex or decimal) as u32, without checking equates
+fn parse_u32_literal(s: &str) -> Result<u32, AsmError> {
+    let s = s.trim();
+
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
         u32::from_str_radix(hex, 16)
             .map_err(|_| AsmError::InvalidImmediate(s.to_string()))
     } else {
@@ -628,6 +955,7 @@ fn parse_u32(s: &str) -> Result<u32, AsmError> {
 fn encode_instruction(
     instr: Instruction,
     labels: &HashMap<String, u32>,
+    equates: &HashMap<String, u32>,
     pc: u32,
 ) -> Result<u32, AsmError> {
     // Generic I-type encoder: [31:26] op, [25:21] rd, [20:16] rs, [15:0] imm
@@ -641,19 +969,19 @@ fn encode_instruction(
     match instr {
         // Loads / stores
         Instruction::Sb { rd, base, imm } => {
-            let v = resolve_imm(imm, labels)?;
+            let v = resolve_imm(imm, labels, equates)?;
             Ok(enc_i(opcode::SB, rd, base, v))
         }
         Instruction::Sw { rd, base, imm } => {
-            let v = resolve_imm(imm, labels)?;
+            let v = resolve_imm(imm, labels, equates)?;
             Ok(enc_i(opcode::SW, rd, base, v))
         }
         Instruction::Lw { rd, base, imm } => {
-            let v = resolve_imm(imm, labels)?;
+            let v = resolve_imm(imm, labels, equates)?;
             Ok(enc_i(opcode::LW, rd, base, v))
         }
         Instruction::Lb { rd, base, imm } => {
-            let v = resolve_imm(imm, labels)?;
+            let v = resolve_imm(imm, labels, equates)?;
             Ok(enc_i(opcode::LB, rd, base, v))
         }
 
@@ -671,33 +999,33 @@ fn encode_instruction(
 
         // ALU immediates
         Instruction::Addi  { rd, rs, imm } => {
-            let v = resolve_imm(imm, labels)?;
+            let v = resolve_imm(imm, labels, equates)?;
             Ok(enc_i(opcode::ADDI, rd, rs, v))
         }
         Instruction::Andi  { rd, rs, imm } => {
-            let v = resolve_imm(imm, labels)?;
+            let v = resolve_imm(imm, labels, equates)?;
             Ok(enc_i(opcode::ANDI, rd, rs, v))
         }
         Instruction::Ori   { rd, rs, imm } => {
-            let v = resolve_imm(imm, labels)?;
+            let v = resolve_imm(imm, labels, equates)?;
             Ok(enc_i(opcode::ORI, rd, rs, v))
         }
         Instruction::Xori  { rd, rs, imm } => {
-            let v = resolve_imm(imm, labels)?;
+            let v = resolve_imm(imm, labels, equates)?;
             Ok(enc_i(opcode::XORI, rd, rs, v))
         }
         Instruction::Slti  { rd, rs, imm } => {
-            let v = resolve_imm(imm, labels)?;
+            let v = resolve_imm(imm, labels, equates)?;
             Ok(enc_i(opcode::SLTI, rd, rs, v))
         }
         Instruction::Sltiu { rd, rs, imm } => {
-            let v = resolve_imm(imm, labels)?;
+            let v = resolve_imm(imm, labels, equates)?;
             Ok(enc_i(opcode::SLTIU, rd, rs, v))
         }
 
         // LUI rd, imm   (rs = r0)
         Instruction::Lui { rd, imm } => {
-            let v = resolve_imm(imm, labels)?;
+            let v = resolve_imm(imm, labels, equates)?;
             Ok(enc_i(opcode::LUI, rd, 0, v))
         }
 

@@ -30,6 +30,27 @@ pub struct Cpu {
     pub halted: bool,
 }
 
+impl Cpu {
+    pub fn regs(&self) -> &[u32; 32] {
+        &self.regs
+    }
+    pub fn pc(&self) -> u32 {
+        self.pc
+    }
+    pub fn sr(&self) -> u32 {
+        self.sr
+    }
+    pub fn epc(&self) -> u32 {
+        self.epc
+    }
+    pub fn cause(&self) -> u32 {
+        self.cause
+    }
+    pub fn halted(&self) -> bool {
+        self.halted
+    }
+}
+
 pub struct Instruction {
     opcode: u8,
     rd: usize,
@@ -130,6 +151,7 @@ impl Cpu {
 
         // Decode instruction
         let instr = Instruction::decode(raw);
+        println!("[{:08X}] Instr: {:?} (raw: {:08X})", self.pc, instr, raw);
 
         // Check IRQ lines for pending interrupts
         if !take_exception {

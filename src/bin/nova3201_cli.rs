@@ -32,6 +32,7 @@ fn load_nv32<P: AsRef<Path>>(mach: &mut Machine, path: P) -> std::io::Result<()>
         match kind {
             // Code (or data)
             0 => {
+                println!("Loading section at 0x{:08X}, size {} words", base_addr, size_words);
                 let mut buf = vec![0u8; (size_words * 4) as usize];
                 f.read_exact(&mut buf)?;
 
@@ -44,6 +45,7 @@ fn load_nv32<P: AsRef<Path>>(mach: &mut Machine, path: P) -> std::io::Result<()>
                 }
             }
             1 => {
+                println!("Zero-initializing section at 0x{:08X}, size {} words", base_addr, size_words);
                 // BSS
                 for i in 0..size_words {
                     let addr = base_addr + i * 4;
@@ -74,6 +76,7 @@ fn main() {
 
     // Run for some cycles
     for _ in 0..10_000 {
+        // mach.inspect();
         mach.step();
         if mach.cpu.halted {
             println!("CPU halted.");
