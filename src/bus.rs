@@ -283,6 +283,7 @@ impl Bus for NovaBus {
 
         if (MMIO_BASE..=MMIO_END).contains(&addr) {
             self.mmio_write32(addr, value)?;
+            return Ok(())
         }
 
         Err(BusError::OutOfBounds(addr))

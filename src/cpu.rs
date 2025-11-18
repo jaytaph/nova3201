@@ -151,7 +151,7 @@ impl Cpu {
 
         // Decode instruction
         let instr = Instruction::decode(raw);
-        println!("[{:08X}] Instr: {:?} (raw: {:08X})", self.pc, instr, raw);
+        // println!("[{:08X}] Instr: {:?} (raw: {:08X})", self.pc, instr, raw);
 
         // Check IRQ lines for pending interrupts
         if !take_exception {

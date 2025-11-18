@@ -1,36 +1,33 @@
-# ----------------------------------------------------------------------
+.equ TIMER1_CTRL,   0x80002100
+.equ TIMER1_PERIOD, 0x80002104
+.equ TIMER1_COUNT,  0x80002108
 
-    .equ TIMER1_CTRL,   0x80002100
-    .equ TIMER1_PERIOD, 0x80002104
-    .equ TIMER1_COUNT,  0x80002108
+.equ TIMER2_CTRL,   0x80002120
+.equ TIMER2_PERIOD, 0x80002124
+.equ TIMER2_COUNT,  0x80002128
 
-    .equ TIMER2_CTRL,   0x80002120
-    .equ TIMER2_PERIOD, 0x80002124
-    .equ TIMER2_COUNT,  0x80002128
+.equ UART_TX,       0x80002200
+.equ UART_STATUS,   0x80002204
 
-    .equ UART_TX,       0x80002200
-    .equ UART_STATUS,   0x80002204
+.equ TIMER_ENABLED,   0x1       ; ENABLED
+.equ TIMER_IRQ_EN,    0x2       ; IRQ_ENABLED (not actually used here)
+.equ TIMER_ONE_SHOT,  0x4       ; ONE_SHOT
 
-    .equ TIMER_ENABLED,   0x1       ; ENABLED
-    .equ TIMER_IRQ_EN,    0x2       ; IRQ_ENABLED (not actually used here)
-    .equ TIMER_ONE_SHOT,  0x4       ; ONE_SHOT
+.equ UART_TX_READY,   0x1       ; status bit 0: TX ready
 
-    .equ UART_TX_READY,   0x1       ; status bit 0: TX ready
 
-# ----------------------------------------------------------------------
+.text
+.org 0x0
+    j _start
 
-    .data
-    .org 0x200
 msg_start:
     .ascii "Timer test start...\n\0"
 
 msg_done:
     .ascii "\nTimer2 one-shot done.\n\0"
 
-# ----------------------------------------------------------------------
 
-    .text
-    .org 0x0
+# ----------------------------------------------------------------------
 
 _start:
     ########################################################
@@ -46,7 +43,7 @@ _start:
     #   ctrl   = ENABLED (no IRQ, just polling)
     ########################################################
     li   r2, TIMER1_PERIOD   # r2 = &TIMER1_PERIOD
-    li   r3, 1000000
+    li   r3, 100
     sw   r3, 0(r2)
 
     li   r2, TIMER1_CTRL     # r2 = &TIMER1_CTRL
@@ -59,7 +56,7 @@ _start:
     #   ctrl   = ENABLED | ONE_SHOT
     ########################################################
     li   r2, TIMER2_PERIOD   # r2 = &TIMER2_PERIOD
-    li   r3, 5000000
+    li   r3, 500
     sw   r3, 0(r2)
 
     li   r2, TIMER2_CTRL     # r2 = &TIMER2_CTRL
@@ -175,6 +172,8 @@ uart_wait:
 # void uart_print(const char* s in r1)
 #   prints 0-terminated string
 uart_print:
+    addi r30, r31, 0        # save return address
+
     # load next char
 uart_print_loop:
     lb   r9, 0(r1)           # r9 = *s
@@ -189,5 +188,6 @@ uart_print_loop:
     nop
 
 uart_print_end:
+    addi r31, r30, 0            # restore return address
     jr   r31
     nop

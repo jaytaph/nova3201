@@ -560,8 +560,7 @@ fn parse_instruction(line: &str, equates: &HashMap<String, u32>) -> Result<Vec<I
                     // Check if it's an equate
                     if let Some(&val) = equates.get(name) {
                         // We have the value, check if it needs expansion
-                        if val <= i16::MAX as u32 || val >= (u16::MAX as u32 - i16::MAX as u32) {
-                            // Fits in 16 bits (either positive or upper i16 range)
+                        if val <= i16::MAX as u32 {
                             Ok(vec![Instruction::Addi { rd, rs: 0, imm: Imm::Value(val as u16 as i16) }])
                         } else {
                             // Need lui + ori expansion for 32-bit values
