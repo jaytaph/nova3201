@@ -26,7 +26,7 @@ module alu (
             // Immediate operations
             ALU_ADDI: rd = rs + {{16{imm16[15]}}, imm16};
 
-            default: rd= 32'hDEAD_BEEF;
+            default: rd= 32'h0000_0000;
         endcase
     end
 

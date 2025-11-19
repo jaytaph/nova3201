@@ -50,21 +50,21 @@ module cpu_core (
     wire [31:0] rs_val;
     wire [31:0] rt_val;
 
-    reg         rf_we;
-    reg  [4:0]  rf_waddr;
-    reg  [31:0] rf_wdata;
+    reg         rd_we;
+    reg  [4:0]  rd_addr;
+    reg  [31:0] rd_data;
 
     regfile rf (
-        .clk    (clk),
-        .reset  (reset),
-        .we     (rf_we),        // Write enable
-        .waddr  (rf_waddr),
-        .wdata  (rf_wdata),
-        .raddr1 (rs),
-        .rdata1 (rs_val),
-        .raddr2 (rt),
-        .rdata2 (rt_val),
-        .debug_r1 (reg1_value)
+        .clk    (clk),          // Clock pulse
+        .reset  (reset),        // Reset input
+        .we     (rd_we),        // Write enabled
+        .rd_addr  (rd_addr),    // Register of destination
+        .rd_data  (rd_data),
+        .rs_addr (rs),          // Register of source
+        .rs_data (rs_val),
+        .rt_addr (rt),          // Register of target
+        .rt_data (rt_val),
+        .debug_r1 (reg1_value)  // Debug for r1
     );
 
     // === ALU ===
@@ -88,31 +88,30 @@ module cpu_core (
 
     always @* begin
         // Default values
-        rf_we    = 1'b0;
-        rf_waddr = 5'd0;
-        rf_wdata = 32'h0000_0000;
+        rd_we    = 1'b0;
+        rd_addr = 5'd0;
+        rd_data = 32'h0000_0000;
         alu_op   = 6'h3E;
         next_pc  = pc + 32'd4;
 
         case (opcode)
             OP_ADD: begin
-                alu_op   = 6'd0;        // ALU_ADD
-                rf_we    = 1'b1;        // write enabled
-                rf_waddr = rd;          // rd is the destination
-                rf_wdata = alu_rd;      // Data is alu_rd result
+                alu_op   = 6'h0;       // ALU_ADD
+                rd_we    = 1'b1;       // write enabled
+                rd_addr = rd;          // rd is the destination
+                rd_data = alu_rd;      // Data is alu_rd result
             end
 
             OP_ADDI: begin
-                alu_op   = 6'd5;        // ALU_ADDI
-                rf_we    = 1'b1;        // write enabled
-                rf_waddr = rd;          // rd is the destination
-                rf_wdata = alu_rd;      // data is alu_rd
+                alu_op   = 6'h10;      // ALU_ADDI
+                rd_we    = 1'b1;       // write enabled
+                rd_addr = rd;          // rd is the destination
+                rd_data = alu_rd;      // data is alu_rd
             end
 
             OP_J: begin
-                // absolute jump using imm16 << 2 (toy)
-                // real design would use full 26 bits etc.
-                next_pc = {pc[31:16], imm16, 2'b00};
+                // Jump to current PC (last 3 bits), plus target shifted left 2
+                next_pc = {pc[31:28], target, 2'b00};
             end
 
             default: begin
