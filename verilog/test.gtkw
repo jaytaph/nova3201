@@ -1,0 +1,34 @@
+[*]
+[*] GTKWave Analyzer v3.3.116 (w)1999-2023 BSI
+[*] Tue Nov 18 20:49:44 2025
+[*]
+[dumpfile] "/home/jthijssen/code/nova3201/verilog/cpu_core.vcd"
+[dumpfile_mtime] "Tue Nov 18 20:47:11 2025"
+[dumpfile_size] 34363
+[savefile] "/home/jthijssen/code/nova3201/verilog/test.gtkw"
+[timestart] 0
+[size] 1192 600
+[pos] -1 -1
+*-13.000000 25000 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[treeopen] cpu_core_tb.
+[treeopen] cpu_core_tb.uut.
+[sst_width] 278
+[signals_width] 213
+[sst_expanded] 1
+[sst_vpaned_height] 157
+@28
+cpu_core_tb.uut.rf.clk
+@22
+cpu_core_tb.uut.the_alu.alu_op[5:0]
+cpu_core_tb.uut.the_alu.imm16[15:0]
+cpu_core_tb.uut.the_alu.rd[31:0]
+cpu_core_tb.uut.the_alu.rs[31:0]
+cpu_core_tb.uut.the_alu.rt[31:0]
+cpu_core_tb.uut.the_alu.target[25:0]
+cpu_core_tb.uut.rf.waddr[4:0]
+cpu_core_tb.uut.rf.wdata[31:0]
+cpu_core_tb.uut.rf.wdata[31:0]
+@29
+cpu_core_tb.uut.rf.we
+[pattern_trace] 1
+[pattern_trace] 0
