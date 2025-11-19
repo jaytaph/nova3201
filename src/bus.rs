@@ -1,6 +1,7 @@
 use crate::devices::font::FontRam;
 use crate::devices::ram::Ram;
 use crate::devices::timer::Timer;
+use crate::devices::uart::pty_backend::PtyBackend;
 use crate::devices::uart::Uart;
 use crate::devices::vram::Vram;
 
@@ -39,7 +40,7 @@ pub struct NovaBus {
     pub font_ram: FontRam, // Character Font RAM
     pub timer1: Timer,     // Timer1
     pub timer2: Timer,     // Timer2 , just because
-    pub uart: Uart,        // Uart
+    pub uart: Uart<PtyBackend>,        // Uart
 }
 
 const RAM_BASE: u32 = 0x0000_0000;
@@ -83,13 +84,19 @@ impl Default for NovaBus {
 
 impl NovaBus {
     pub fn new() -> Self {
+        let (backend, slave_path) = PtyBackend::new().expect("Failed to create PTY backend for UART");
+
+        println!("UART slave device created at: {}", slave_path);
+        println!("You can connect to it using a terminal emulator (e.g., minicom, screen).");
+        println!("Waiting for connection...");
+
         Self {
             ram: Ram::new(RAM_SIZE as usize),
             vram: Vram::new(VRAM_SIZE as usize),
             font_ram: FontRam::new(FONT_SIZE as usize),
             timer1: Timer::new(),
             timer2: Timer::new(),
-            uart: Uart::new(),
+            uart: Uart::new(backend),
         }
     }
 
@@ -164,7 +171,7 @@ impl NovaBus {
             UART_TX => {
                 // normally you'd only use store8 here, but define behavior anyway:
                 let byte = (value & 0xFF) as u8;
-                self.uart.write8(0, byte);
+                self.uart.write_tx(byte);
                 Ok(())
             }
             _ => Err(BusError::OutOfBounds(addr)),
@@ -181,7 +188,7 @@ impl NovaBus {
     fn mmio_write8(&mut self, addr: u32, value: u8) -> Result<(), BusError> {
         match addr {
             UART_TX => {
-                self.uart.write8(0, value);
+                self.uart.write_tx(value);
                 Ok(())
             }
             // for others, you could do read-modify-write on the 32-bit reg if you want:

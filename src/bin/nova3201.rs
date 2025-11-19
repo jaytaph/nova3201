@@ -2,9 +2,9 @@ use std::env;
 use std::fs;
 use std::io::Read;
 use std::path::Path;
-use std::process;
 use nova3201::bus::Bus;
-use nova3201::Machine;
+use nova3201::{Machine, NovaBus};
+use nova3201::BOOT_LOGO;
 
 fn load_nv32<P: AsRef<Path>>(mach: &mut Machine, path: P) -> std::io::Result<()> {
     let mut f = fs::File::open(path)?;
@@ -64,23 +64,52 @@ fn load_nv32<P: AsRef<Path>>(mach: &mut Machine, path: P) -> std::io::Result<()>
 }
 
 fn main() {
-    let path = env::args().nth(1).expect("Usage: nvrun <program.nvb>");
+    let path = env::args().nth(1).expect("Usage: nova3201 <program.nvb>");
 
     let mut mach = Machine::new();
-    println!("Loading program '{}'", path);
 
-    if let Err(e) = load_nv32(&mut mach, &path) {
-        eprintln!("Error loading binary: {e}");
-        process::exit(1);
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input).unwrap();
+
+    emulate(&mut mach, path);
+
+    println!("Simulation ended. Press Enter to exit.");
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input).unwrap();
+}
+
+
+pub fn emulate(mach: &mut Machine, path: String) {
+    // Start by printing the boot logo
+    uart_println(&mut mach.bus, BOOT_LOGO);
+
+    uart_println(&mut mach.bus, "  - Loading ROM: [OK]\n");
+    uart_println(&mut mach.bus, "  - Loading user program: ");
+    if let Err(e) = load_nv32(mach, &path) {
+        uart_println(&mut mach.bus, &format!("  [ERR]: {e}\n"));
+        return;
     }
+    uart_println(&mut mach.bus, "[OK]\n");
 
+    uart_println(&mut mach.bus, "  - Starting simulation\n\n\n");
     // Run for some cycles
     for _ in 0..10_000 {
         // mach.inspect();
         mach.step();
         if mach.cpu.halted {
-            println!("CPU halted.");
-            break;
+            uart_println(&mut mach.bus, "\n\n\nCPU halted");
+            return;
         }
+    }
+
+    uart_println(&mut mach.bus, "\n\n\n  - Simulation ended after 10,000 cycles.\n");
+}
+
+fn uart_println(bus: &mut NovaBus, s: &str) {
+    for c in s.chars() {
+        if c == '\n' {
+            bus.uart.write_tx(b'\r');
+        }
+        bus.uart.write_tx(c as u8);
     }
 }
